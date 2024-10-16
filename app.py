@@ -14,7 +14,7 @@ import time
 logging.basicConfig(level=logging.INFO)
 
 # MongoDB setup
-client = MongoClient('mongodb+srv://vijay7824:UqLmMrskLFdxDT95@cluster0.hf9ywie.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0')
+# client = MongoClient('mongodb://localhost:27017/') change uri as per use
 db = client['pdf_database']
 collection = db['pdf_documents']
 
