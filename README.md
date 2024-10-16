@@ -30,7 +30,6 @@ Ensure you have the following installed:
 1. **Clone the repository**:
     ```bash
     git clone https://github.com/vijay7824/wasserstoff-AiInternTask.git
-    cd pdf-summarizer-keyword-extractor
     ```
 
 2. **Install the required dependencies**:
