@@ -7,12 +7,14 @@ from transformers import pipeline, BartForConditionalGeneration, BartTokenizer
 from PyPDF2 import PdfReader
 from sklearn.feature_extraction.text import TfidfVectorizer
 import streamlit as st
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
 
 # MongoDB setup
-client = MongoClient('mongodb://localhost:27017/')
+client = MongoClient('mongodb+srv://vijay7824:UqLmMrskLFdxDT95@cluster0.hf9ywie.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0')
 db = client['pdf_database']
 collection = db['pdf_documents']
 
@@ -22,11 +24,18 @@ model = BartForConditionalGeneration.from_pretrained(model_name)
 tokenizer = BartTokenizer.from_pretrained(model_name)
 summarizer = pipeline("summarization", model=model, tokenizer=tokenizer)
 
-def summarize_large_text(text, chunk_size=1024):
+def summarize_large_text(text):
+    # Adjust chunk size based on the text length
+    if len(text) > 3000:
+        chunk_size = 1024  
+    elif len(text) > 1000:
+        chunk_size = 512   
+    else:
+        chunk_size = 256   
+
     if len(text) > chunk_size:
         chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
         final_summary = ""
-        
         for chunk in chunks:
             try:
                 summary = summarizer(chunk, max_length=450, min_length=40, do_sample=False)
@@ -36,7 +45,6 @@ def summarize_large_text(text, chunk_size=1024):
                     logging.error("Summarizer response does not contain 'summary_text'.")
             except Exception as e:
                 logging.error(f"Error generating summary: {e}")
-        
         return final_summary.strip()
     else:
         try:
@@ -64,11 +72,10 @@ def process_pdf(pdf_file):
             content = page.extract_text()
             if content:
                 text += content
-        
         if not text:
             logging.warning("No text extracted from the PDF. Skipping this file.")
             return None
-
+        
         document_info = {
             'document_name': pdf_file.name,
             'size': pdf_file.size,
@@ -76,14 +83,14 @@ def process_pdf(pdf_file):
             'summary': None,
             'keywords': None,
         }
-        
+
         # Insert metadata into MongoDB
         doc_id = collection.insert_one(document_info).inserted_id
 
         # Summarization and keyword extraction
         summary = summarize_large_text(text)
         keywords = extract_keywords(text)
-        
+
         # Update MongoDB with summary and keywords
         collection.update_one(
             {'_id': doc_id},
@@ -99,20 +106,32 @@ def process_pdf(pdf_file):
 # Streamlit UI
 st.title("PDF Summary and Keyword Extractor")
 
-pdf = st.file_uploader("Upload a PDF file", type='pdf')
+# Concurrency settings
+max_workers = 4  # You can adjust this based on your machine's capability
+executor = ThreadPoolExecutor(max_workers=max_workers)
 
-if pdf is not None:
-    st.write("Processing your PDF...")
-    summary, keywords = process_pdf(pdf)
+pdf_files = st.file_uploader("Upload PDF files", type='pdf', accept_multiple_files=True)
 
-    if summary and keywords:
-        st.subheader("Summary")
-        st.write(summary)
-        
-        st.subheader("Keywords")
-        st.write(", ".join(keywords))
-    else:
-        st.write("An error occurred while processing the PDF.")
+if pdf_files:
+    st.write("Processing your PDFs...")
+    start_time = time.time()
 
+    futures = {executor.submit(process_pdf, pdf): pdf.name for pdf in pdf_files}
+    
+    for future in as_completed(futures):
+        pdf_name = futures[future]
+        try:
+            summary, keywords = future.result()
+            if summary and keywords:
+                st.subheader(f"Summary for {pdf_name}")
+                st.write(summary)
+                st.subheader("Keywords")
+                st.write(", ".join(keywords))
+            else:
+                st.write(f"An error occurred while processing {pdf_name}.")
+        except Exception as e:
+            st.write(f"Error processing {pdf_name}: {e}")
 
-
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    st.write(f"Total time taken to process documents: {elapsed_time:.2f} seconds.")
